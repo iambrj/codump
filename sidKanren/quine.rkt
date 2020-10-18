@@ -40,7 +40,7 @@
 	 (== `(,rator ,rand) expr)
 	 (eval-expo rator env `(closure ,x ,body ,env2))
 	 (eval-expo rand env a)
-	 (eval-expo body `(((,x . ,a) . ,env2)) val))])))
+	 (eval-expo body `((,x . ,a) . ,env2) val))])))
 ;; ((lambda (x) (x x)) (lambda (x) (x x)))
 
 
