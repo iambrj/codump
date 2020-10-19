@@ -9,23 +9,16 @@
 ; cbv lc
 ; quotes, lists
 
-; symbolo q: enforce q is a symbol.
-; absento x y: list x and symbol y
-; (define (lookupo id env val)
-;   (conde
-;     [(== env '()) (== #t #f)]
-;     [(fresh (x y resto)
-;        (== `((,x . ,y) . ,resto) env)
-;        (conde
-;          [(== x id) (== y val)]
-;          [(=/= x id) (lookupo id resto val)]))]))
-
+symbolo q: enforce q is a symbol.
+absento x y: list x and symbol y
 (define (lookupo id env val)
-  (fresh (x y resto)
-    (== `((,x . ,y) . ,resto) env)
-    (conde
-      [(== id x) (== val y)]
-      [(=/= id x) (lookupo id resto val)])))
+  (conde
+    [(== env '()) (== #t #f)]
+    [(fresh (x y resto)
+       (== `((,x . ,y) . ,resto) env)
+       (conde
+         [(== x id) (== y val)]
+         [(=/= x id) (lookupo id resto val)]))]))
 
 (define (not-in-env sym env)
   (conde
