@@ -9,8 +9,8 @@
 ; cbv lc
 ; quotes, lists
 
-symbolo q: enforce q is a symbol.
-absento x y: list x and symbol y
+; symbolo q: enforce q is a symbol.
+; absento x y: list x and symbol y
 (define (lookupo id env val)
   (conde
     [(== env '()) (== #t #f)]
