@@ -1,7 +1,11 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE FlexibleInstances #-}
 module Main where
 import qualified Data.Map.Strict as M
 import Data.List(intercalate)
 import Data.Monoid
+
 
 -- implement an interpreter that implements the "real" semantics
 -- show how to abstract "real" semantics into "faster" abstract semantics
@@ -40,37 +44,54 @@ data Block = Block [Stmt]  deriving(Eq)
 
 type Store = LatMap Var (Lifted Value) -- key -> value
 
+  
 
 
-initialState :: Store; initialState = bottom
+-- | given a variable and a value, store this value into the store.
+-- instance AbstractStore M Int
 
-interpretStmt :: Store -> Stmt -> Store
+class (JoinSemilattice s, JoinSemilattice a, Eq a) => AbstractStore s a | s -> a, a -> s where
+   insertAbstractStore :: Var -> Value -> s -> s
+   lookupAbstractStore :: Var -> s -> a
+   injectValue :: Value -> a
+  -- TODO: do we use ==? or something weaker to compare real abstract values and
+  -- injected values?
+  -- magic word: Filters (set theoretic sense)
+
+instance AbstractStore (LatMap Var (Lifted Value)) (Lifted Value) where
+   insertAbstractStore var val s = insertLatMap var (Lifted val) s
+   lookupAbstractStore var s = lookupLatMap var s
+   injectValue = Lifted
+  
+initialState :: AbstractStore s a => s; initialState = bottom
+interpretStmt :: AbstractStore s a => s -> Stmt -> s
 interpretStmt sto (SLabel _ ) = sto
-interpretStmt sto (SSet v i) = insertLatMap v (Lifted i) sto
+interpretStmt sto (SSet v i) = insertAbstractStore v i sto
 interpretStmt sto (SIf var t e) = 
-  case lookupLatMap var sto of
-    Lifted 0 ->  interpretBlock sto e
-    Lifted _ ->  interpretBlock sto t
-    -- _ -> error $ "unable to find variable: |" <> var <> "| in store: |" <> show sto <> "|"
-    _ -> (interpretBlock sto t) `join` (interpretBlock sto e)
+  let varValue =  lookupAbstractStore var sto
+  in if varValue == bottom
+     then (interpretBlock sto t) `join` (interpretBlock sto e)
+     else if varValue == injectValue 0
+          then interpretBlock sto e
+          else interpretBlock sto t
       
 
-interpretBlock :: Store -> Block -> Store
+interpretBlock :: AbstractStore s a => s -> Block -> s
 interpretBlock sto (Block ss) = foldl interpretStmt sto  ss
 
 
-f :: (Store, LatMap Label Store) -> Stmt -> (Store, LatMap Label Store)
+f :: AbstractStore s a => (s, M.Map Label s) -> Stmt -> (s, M.Map Label s)
 f (sto, label2st) stmt =
   let sto' = interpretStmt sto stmt
   in case stmt of
-         SLabel lbl -> (sto', insertLatMap lbl sto' label2st)
+         SLabel lbl -> (sto', M.insert lbl sto' label2st)
          _ -> (sto', label2st)
 
 
 -- foldl :: Foldable t => (b -> a -> b) -> b -> t a -> b
-interpretProgramCollecting :: Block -> LatMap Label Store
+interpretProgramCollecting :: AbstractStore s a => Block -> M.Map Label s
 interpretProgramCollecting (Block ss) = 
-  snd $ foldl f (initialState, bottom) ss
+  snd $ foldl f (initialState, M.empty) ss
 
 
 -- All /information/ ought to be join semilattice.
@@ -87,7 +108,7 @@ class JoinSemilattice a where
   join :: a -> a -> a
 
 -- | join semilattice
-data Lifted a = LBot | LTop | Lifted a
+data Lifted a = LBot | LTop | Lifted a deriving(Eq)
 
 instance Show a => Show (Lifted a) where 
   show LBot = "⊥"
@@ -150,8 +171,8 @@ mainp1 :: IO ()
 mainp1 = do
   print "P1:"
   print p1
-  print (interpretBlock initialState p1)
-  print (interpretProgramCollecting p1)
+  -- print (interpretBlock initialState p1)
+  print (interpretProgramCollecting p1 :: M.Map Label (LatMap Var (Lifted Value)))
   print "===="
 
 p2 :: Block
@@ -164,14 +185,14 @@ p2 =
     SIf "b" thenBlock elseBlock,
     SLabel "3"]
   where thenBlock = Block $ [SSet "a" 42]
-        elseBlock = Block $ [SSet "a" 42]
+        elseBlock = Block $ [SSet "a" 43]
 
 
 mainp2 :: IO ()
 mainp2 = do
   print "P2:"
   print p2
-  print (interpretProgramCollecting p2)
+  print (interpretProgramCollecting p2 :: M.Map Label (LatMap Var (Lifted Value)))
   print "===="
 
 main :: IO ()
