@@ -38,35 +38,39 @@ data Block = Block [Stmt]  deriving(Eq)
 -- bottom element
 -- union operation
 
-type Store = M.Map Var Value -- key -> value
-initialState :: Store; initialState = M.empty
+type Store = LatMap Var (Lifted Value) -- key -> value
+
+
+
+initialState :: Store; initialState = bottom
 
 interpretStmt :: Store -> Stmt -> Store
 interpretStmt sto (SLabel _ ) = sto
-interpretStmt sto (SSet v i) = M.insert v i sto
+interpretStmt sto (SSet v i) = insertLatMap v (Lifted i) sto
 interpretStmt sto (SIf var t e) = 
-  case M.lookup var sto of
-    Just 0 ->  interpretBlock sto e
-    Just _ ->  interpretBlock sto t
-    Nothing -> error $ "unable to find variable: |" <> var <> "| in store: |" <> show sto <> "|"
+  case lookupLatMap var sto of
+    Lifted 0 ->  interpretBlock sto e
+    Lifted _ ->  interpretBlock sto t
+    -- _ -> error $ "unable to find variable: |" <> var <> "| in store: |" <> show sto <> "|"
+    _ -> (interpretBlock sto t) `join` (interpretBlock sto e)
       
 
 interpretBlock :: Store -> Block -> Store
 interpretBlock sto (Block ss) = foldl interpretStmt sto  ss
 
 
-f :: (Store, M.Map Label Store) -> Stmt -> (Store, M.Map Label Store)
+f :: (Store, LatMap Label Store) -> Stmt -> (Store, LatMap Label Store)
 f (sto, label2st) stmt =
   let sto' = interpretStmt sto stmt
   in case stmt of
-         SLabel lbl -> (sto', M.insert lbl sto' label2st)
+         SLabel lbl -> (sto', insertLatMap lbl sto' label2st)
          _ -> (sto', label2st)
 
 
 -- foldl :: Foldable t => (b -> a -> b) -> b -> t a -> b
-interpretProgramCollecting :: Block -> M.Map Label Store
+interpretProgramCollecting :: Block -> LatMap Label Store
 interpretProgramCollecting (Block ss) = 
-  snd $ foldl f (initialState, M.empty) ss
+  snd $ foldl f (initialState, bottom) ss
 
 
 -- All /information/ ought to be join semilattice.
@@ -83,13 +87,28 @@ class JoinSemilattice a where
   join :: a -> a -> a
 
 -- | join semilattice
-data Lifted a = LBot | LTop | Lifed a
+data Lifted a = LBot | LTop | Lifted a
 
-instance JoinSemilattice (Lifted a) where
+instance Show a => Show (Lifted a) where 
+  show LBot = "⊥"
+  show LTop = "T"
+  show (Lifted a) = "Lifted(" <> show a <> ")"
+
+instance (Eq a) => JoinSemilattice (Lifted a) where
   bottom = LBot 
   join LBot x = x
   join x LBot = x
-  join x y = LTop
+  join (Lifted a) (Lifted a') = if a == a' then (Lifted a) else LTop
+  join LTop x = LTop
+  join x LTop = LTop
+
+
+instance JoinSemilattice a => JoinSemilattice (Maybe a) where
+  bottom = Nothing
+  join Nothing x = x
+  join x Nothing = x
+  join (Just x) (Just x') = Just (x `join` x')
+  
 
 
 newtype LatMap k v = LatMap (M.Map k v) deriving(Eq, Show)
@@ -103,13 +122,18 @@ lookupLatMap k (LatMap k2v) =
 joinLatMap :: (Ord k, JoinSemilattice v) => LatMap k v -> LatMap k v -> LatMap k v
 joinLatMap (LatMap m1) (LatMap m2) = LatMap $ (M.unionWith join) m1 m2
 
+-- [(k, v)] \/ m
+insertLatMap :: (Ord k, JoinSemilattice v) => k -> v 
+  -> LatMap k v -> LatMap k v
+insertLatMap k v (LatMap m) = LatMap (M.insert k v m)
+   -- (LatMap (M.singleton k v)) `join` lm
+
 -- [v is a join semilattice] => 
 --    function space [k -> v] is also a join semilattice
 -- using this for Show instance
 instance (Ord k, JoinSemilattice v) => JoinSemilattice (LatMap k v) where
   bottom = LatMap M.empty -- (\k -> bot)
   join = joinLatMap -- f \/ g = (\k -> f k \/ g k)
-
 
 -- | actual structure
 instance JoinSemilattice v => JoinSemilattice (k -> v) where
@@ -138,7 +162,7 @@ p2 =
     SLabel "1", 
     SSet "a" 20, SLabel "2",
     SIf "b" thenBlock elseBlock,
-    SLabel "2"]
+    SLabel "3"]
   where thenBlock = Block $ [SSet "a" 42]
         elseBlock = Block $ [SSet "a" 42]
 
